@@ -2,6 +2,7 @@ import itertools
 import multiprocessing
 from typing import List, Tuple, Dict
 import os
+import tempfile
 
 def read_chunk(file_path: str, start: int, size: int) -> List[str]:
     with open(file_path, 'r') as f:
@@ -43,9 +44,29 @@ def hash_partition_function(mapped_data: List[Tuple[str, float]], num_partitions
         partitions[partition_index].append((station, temp))
     return partitions
 
-def process_partition(partition):
-    return {station: reduce_function(station, [temp for _, temp in group])
-            for station, group in itertools.groupby(sorted(partition), key=lambda x: x[0])}
+def write_partition_to_disk(partition, partition_id):
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, prefix=f'partition_{partition_id}_', suffix='.txt') as temp_file:
+        for station, temp in partition:
+            temp_file.write(f"{station};{temp}\n")
+    return temp_file.name
+
+def read_partition_from_disk(file_path):
+    with open(file_path, 'r') as f:
+        for line in f:
+            station, temp = line.strip().split(';')
+            yield station, float(temp)
+
+def process_partition(partition_file):
+    data = read_partition_from_disk(partition_file)
+    results = {station: reduce_function(station, [temp for _, temp in group])
+               for station, group in itertools.groupby(sorted(data), key=lambda x: x[0])}
+    
+    # Write results to a temporary file
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, prefix='result_', suffix='.txt') as temp_file:
+        for station, (_, min_temp, max_temp, avg_temp) in results.items():
+            temp_file.write(f"{station};{min_temp:.1f};{max_temp:.1f};{avg_temp:.1f}\n")
+    
+    return temp_file.name
 
 import time
 
@@ -76,35 +97,30 @@ def main():
             flattened_data = [item for sublist in mapped_data for item in sublist]
             print(f"Flattening time: {time.time() - flatten_start:.2f} seconds")
             
-            # Use hash_partition_function to distribute data across partitions
+            # Use hash_partition_function to distribute data across partitions and write to disk
             partition_start = time.time()
             num_partitions = multiprocessing.cpu_count()
             partitioned_data = hash_partition_function(flattened_data, num_partitions)
-            print(f"Partitioning time: {time.time() - partition_start:.2f} seconds")
+            partition_files = [write_partition_to_disk(partition, i) for i, partition in enumerate(partitioned_data)]
+            print(f"Partitioning and writing to disk time: {time.time() - partition_start:.2f} seconds")
             
-            # Apply reduce_function to each partition using the new process_partition function
+            # Apply reduce_function to each partition file
             reduce_start = time.time()
-            reduced_data = pool.map(process_partition, partitioned_data)
+            result_files = pool.map(process_partition, partition_files)
             print(f"Reducing time: {time.time() - reduce_start:.2f} seconds")
             
             # Merge the results from all partitions
             merge_start = time.time()
-            final_results = {}
-            for partition_result in reduced_data:
-                final_results.update(partition_result)
+            with open('sorted_data.txt', 'w') as output_file:
+                for result_file in result_files:
+                    with open(result_file, 'r') as f:
+                        output_file.write(f.read())
+                    os.unlink(result_file)  # Delete the temporary file
             print(f"Merging time: {time.time() - merge_start:.2f} seconds")
 
-            # Sort the reduced data by station
-            sort_start = time.time()
-            sorted_data = sorted(final_results.items())
-            print(f"Sorting time: {time.time() - sort_start:.2f} seconds")
-
-            # Write the sorted data to a new file
-            write_start = time.time()
-            with open('sorted_data.txt', 'w') as output_file:
-                for station, (_, min_temp, max_temp, avg_temp) in sorted_data:
-                    output_file.write(f"{station};{min_temp:.1f};{max_temp:.1f};{avg_temp:.1f}\n")
-            print(f"Writing time: {time.time() - write_start:.2f} seconds")
+            # Clean up partition files
+            for file in partition_files:
+                os.unlink(file)
 
     end_time = time.time()
     print(f"Total execution time: {end_time - start_time:.2f} seconds")

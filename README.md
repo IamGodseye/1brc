@@ -18,22 +18,30 @@ A Python script for processing large weather station data files using multiproce
 
 ## Benchmark
 
-Results for a 130 MB file:
+We've tested two different approaches for processing the 130 MB file. Here are the results:
 
+| Operation | Approach 1 (seconds) | Approach 2 (seconds) |
+|-----------|----------------------|----------------------|
+| Chunking | 1.36 | 1.44 |
+| Mapping | 14.47 | 13.44 |
+| Flattening | 2.05 | 1.41 |
+| Partitioning | 21.68 | 25.35 |
+| Reducing | 102.72 | 10.73 |
+| Merging | 0.00 | 0.00 |
+| Sorting | 0.00 | - |
+| Writing | 0.09 | - |
+| **Total execution time** | **142.37** | **52.78** |
+
+File details:
 - File size: 131.56 MB
 - Number of chunks: 132
-- Total execution time: 142.37 seconds
 
-Breakdown:
-- Chunking time: 1.36 seconds
-- Mapping time: 14.47 seconds
-- Flattening time: 2.05 seconds
-- Partitioning time: 21.68 seconds
-- Reducing time: 102.72 seconds
-- Merging time: 0.00 seconds
-- Sorting time: 0.00 seconds
-- Writing time: 0.09 seconds
+### Approach 1
+This approach uses a more detailed breakdown of operations, including separate steps for sorting and writing results.
+
+### Approach 2
+This approach combines some operations and optimizes the reducing step, resulting in a significant performance improvement.
 
 ## Performance Tuning
 
-Adjust `chunk_size` and `num_partitions` for optimization on different hardware.
+Adjust `chunk_size` and `num_partitions` for optimization on different hardware. The second approach demonstrates that optimizing the reducing step can lead to substantial performance gains.
